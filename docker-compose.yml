@@ -1,0 +1,131 @@
+services:
+  # -------------------- Kafka (KRaft) --------------------
+  broker:
+    image: apache/kafka:3.7.0
+    container_name: broker
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  # -------------------- MinIO (S3 for Hudi) --------------------
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 endpoint
+      - "9001:9001"   # Console UI
+    volumes:
+      - minio_data:/data
+
+  # Create bucket automatically
+  minio_init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 2;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb -p local/hudi || true;
+      mc anonymous set none local/hudi || true;
+      echo 'MinIO bucket ready: hudi';
+      "
+    restart: "no"
+
+  # -------------------- Flink --------------------
+  jobmanager:
+    build:
+      context: ./docker/flink
+    image: final-flink:1.18.1
+    container_name: flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      HADOOP_CONF_DIR: /opt/flink/conf
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        jobmanager.memory.process.size: 1600m
+        parallelism.default: 1
+        taskmanager.numberOfTaskSlots: 2
+        state.backend: hashmap
+        # checkpoints/savepoints can remain on local docker volume
+        state.checkpoints.dir: file:///data/flink-checkpoints
+        state.savepoints.dir: file:///data/flink-savepoints
+
+        # --- S3A / MinIO (Hudi writes directly to MinIO) ---
+        fs.s3a.endpoint: http://minio:9000
+        fs.s3a.access.key: minioadmin
+        fs.s3a.secret.key: minioadmin
+        fs.s3a.path.style.access: true
+        fs.s3a.connection.ssl.enabled: false
+        fs.s3a.aws.credentials.provider: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        fs.AbstractFileSystem.s3a.impl: org.apache.hadoop.fs.s3a.S3A
+    volumes:
+      - ./docker/data:/data
+    depends_on:
+      - broker
+      - minio
+      - minio_init
+
+  taskmanager:
+    image: final-flink:1.18.1
+    command: taskmanager
+    deploy:
+      replicas: 2
+    environment:
+      HADOOP_CONF_DIR: /opt/flink/conf
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        taskmanager.memory.process.size: 2000m
+
+        # --- S3A / MinIO ---
+        fs.s3a.endpoint: http://minio:9000
+        fs.s3a.access.key: minioadmin
+        fs.s3a.secret.key: minioadmin
+        fs.s3a.path.style.access: true
+        fs.s3a.connection.ssl.enabled: false
+        fs.s3a.aws.credentials.provider: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        fs.AbstractFileSystem.s3a.impl: org.apache.hadoop.fs.s3a.S3A
+    volumes:
+      - ./docker/data:/data
+    depends_on:
+      - jobmanager
+
+  # -------------------- Optional: auto-submit Hudi job --------------------
+  # Requires you to place your job jar into: docker/flink/usrlib/hudi-1.0.0-shaded.jar
+  hudi_job:
+    image: final-flink:1.18.1
+    container_name: flink-submit-hudi
+    environment:
+      HADOOP_CONF_DIR: /opt/flink/conf
+    depends_on:
+      - jobmanager
+      - taskmanager
+      - broker
+      - minio_init
+    command: ["/submit-hudi.sh"]
+    restart: "no"
+
+
+volumes:
+  minio_data:

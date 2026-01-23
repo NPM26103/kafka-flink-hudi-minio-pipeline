@@ -1,0 +1,22 @@
+# Maven / Java
+target/
+*.class
+*.log
+
+# IntelliJ / VSCode
+.idea/
+*.iml
+.vscode/
+
+# Mac / OS
+.DS_Store
+
+# Env
+.env
+*.local
+
+# Docker runtime data
+docker/data/
+docker/flink/data/
+docker/minio/data/
+**/data/
