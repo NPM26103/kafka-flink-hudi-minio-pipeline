@@ -18,7 +18,24 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
-  # -------------------- MinIO (S3 for Hudi) --------------------
+  # Create topics before Flink/Hudi start (fix UnknownTopicOrPartition)
+  kafka_init:
+    image: apache/kafka:3.7.0
+    depends_on:
+      - broker
+    entrypoint: ["/bin/sh","-lc"]
+    command: >
+      "
+      echo 'Waiting Kafka...'; sleep 3;
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic raw.student.csv --partitions 1 --replication-factor 1;
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic raw.student.http --partitions 1 --replication-factor 1;
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic output-topic --partitions 1 --replication-factor 1;
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --create --if-not-exists --topic output-topic-dlq --partitions 1 --replication-factor 1;
+      echo 'Kafka topics ready.';
+      "
+    restart: "no"
+
+  # -------------------- MinIO (S3 for Hudi/Hive) --------------------
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -27,19 +44,18 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"   # S3 endpoint
-      - "9001:9001"   # Console UI
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
 
-  # Create bucket automatically
   minio_init:
     image: minio/mc:latest
     container_name: minio-init
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c "
+      /bin/sh -lc "
       sleep 2;
       mc alias set local http://minio:9000 minioadmin minioadmin;
       mc mb -p local/hudi || true;
@@ -59,17 +75,18 @@ services:
       - "8081:8081"
     environment:
       HADOOP_CONF_DIR: /opt/flink/conf
+      # optional: also provide env creds (some libs read env first)
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         jobmanager.memory.process.size: 1600m
         parallelism.default: 1
         taskmanager.numberOfTaskSlots: 2
         state.backend: hashmap
-        # checkpoints/savepoints can remain on local docker volume
         state.checkpoints.dir: file:///data/flink-checkpoints
         state.savepoints.dir: file:///data/flink-savepoints
 
-        # --- S3A / MinIO (Hudi writes directly to MinIO) ---
         fs.s3a.endpoint: http://minio:9000
         fs.s3a.access.key: minioadmin
         fs.s3a.secret.key: minioadmin
@@ -82,22 +99,22 @@ services:
       - ./docker/data:/data
     depends_on:
       - broker
+      - kafka_init
       - minio
       - minio_init
 
-  taskmanager:
+  taskmanager1:
     image: final-flink:1.18.1
     command: taskmanager
-    deploy:
-      replicas: 2
     environment:
       HADOOP_CONF_DIR: /opt/flink/conf
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
         taskmanager.memory.process.size: 2000m
 
-        # --- S3A / MinIO ---
         fs.s3a.endpoint: http://minio:9000
         fs.s3a.access.key: minioadmin
         fs.s3a.secret.key: minioadmin
@@ -111,21 +128,178 @@ services:
     depends_on:
       - jobmanager
 
-  # -------------------- Optional: auto-submit Hudi job --------------------
-  # Requires you to place your job jar into: docker/flink/usrlib/hudi-1.0.0-shaded.jar
+  taskmanager2:
+    image: final-flink:1.18.1
+    command: taskmanager
+    environment:
+      HADOOP_CONF_DIR: /opt/flink/conf
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        taskmanager.memory.process.size: 2000m
+
+        fs.s3a.endpoint: http://minio:9000
+        fs.s3a.access.key: minioadmin
+        fs.s3a.secret.key: minioadmin
+        fs.s3a.path.style.access: true
+        fs.s3a.connection.ssl.enabled: false
+        fs.s3a.aws.credentials.provider: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+        fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+        fs.AbstractFileSystem.s3a.impl: org.apache.hadoop.fs.s3a.S3A
+    volumes:
+      - ./docker/data:/data
+    depends_on:
+      - jobmanager
+
+  # -------------------- Auto-submit Flink transform job --------------------
+  flink_job:
+    image: final-flink:1.18.1
+    container_name: flink-submit-flink
+    environment:
+      HADOOP_CONF_DIR: /opt/flink/conf
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    depends_on:
+      - jobmanager
+      - taskmanager1
+      - taskmanager2
+      - broker
+      - kafka_init
+    command: ["/submit-flink.sh"]
+    restart: "no"
+
+  # -------------------- Auto-submit Hudi job --------------------
   hudi_job:
     image: final-flink:1.18.1
     container_name: flink-submit-hudi
     environment:
       HADOOP_CONF_DIR: /opt/flink/conf
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
     depends_on:
       - jobmanager
-      - taskmanager
+      - taskmanager1
+      - taskmanager2
       - broker
+      - kafka_init
       - minio_init
+      - hive-metastore
     command: ["/submit-hudi.sh"]
     restart: "no"
+
+  # -------------------- Hive Metastore DB --------------------
+  metastore-db:
+    image: postgres:15
+    container_name: metastore-db
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    ports:
+      - "5433:5432"
+    volumes:
+      - metastore_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # -------------------- Init Metastore Schema (run once) --------------------
+  hive_metastore_init:
+    image: hive-hudi:4.0.0
+    container_name: hive-metastore-init
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+    environment:
+      HADOOP_CONF_DIR: /opt/hive/conf
+      HIVE_AUX_JARS_PATH: /opt/hive/auxlib
+    volumes:
+      - ./docker/hive/conf/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+      - ./docker/hive/conf/core-site.xml:/opt/hive/conf/core-site.xml:ro
+      - ./docker/hive/auxlib:/opt/hive/auxlib:ro
+    entrypoint: ["/bin/sh","-lc"]
+    command:
+      - |
+        set -e;
+        echo "[INIT] Checking metastore schema...";
+        if /opt/hive/bin/schematool -dbType postgres -info >/dev/null 2>&1; then
+          echo "[INIT] Schema already initialized -> skip.";
+          exit 0;
+        fi
+
+        echo "[INIT] Schema not found -> initSchema...";
+        /opt/hive/bin/schematool -dbType postgres -initSchema --verbose;
+        echo "[INIT] Done.";
+    restart: "no"
+
+
+  # -------------------- Hive Metastore (Thrift 9083) --------------------
+  hive-metastore:
+    image: hive-hudi:4.0.0
+    container_name: hive-metastore
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      hive_metastore_init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+    environment:
+      HADOOP_CONF_DIR: /opt/hive/conf
+      HIVE_AUX_JARS_PATH: /opt/hive/auxlib
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./docker/hive/conf/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+      - ./docker/hive/conf/core-site.xml:/opt/hive/conf/core-site.xml:ro
+      - ./docker/hive/auxlib:/opt/hive/auxlib:ro
+    entrypoint: ["/bin/sh","-lc"]
+    command:
+      - |
+        set -eux;
+        exec /opt/hive/bin/hive --service metastore
+    restart: "no"
+
+
+  # -------------------- HiveServer2 (JDBC 10000) --------------------
+  hive-server2:
+    image: hive-hudi:4.0.0
+    container_name: hive-server2
+    depends_on:
+      hive-metastore:
+        condition: service_started
+    environment:
+      HADOOP_CONF_DIR: /opt/hive/conf
+      HIVE_AUX_JARS_PATH: /opt/hive/auxlib
+
+      # tránh kẹt pid mặc định
+      HIVE_SERVER2_PID_DIR: /tmp/hive-pids
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    volumes:
+      - ./docker/hive/conf/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+      - ./docker/hive/conf/core-site.xml:/opt/hive/conf/core-site.xml:ro
+      - ./docker/hive/auxlib:/opt/hive/auxlib:ro
+    entrypoint: ["/bin/sh","-lc"]
+    command: 
+      - |
+        set -eux
+        # dọn pid/lock nếu container bị restart
+        mkdir -p /tmp/hive-pids
+        rm -f /tmp/hive-pids/hiveserver2.pid \
+              /tmp/hiveserver2.pid \
+              /tmp/hive/hiveserver2.pid || true
+        # foreground
+        exec /opt/hive/bin/hive --service hiveserver2
+    restart: unless-stopped
+
 
 
 volumes:
   minio_data:
+  metastore_db:
