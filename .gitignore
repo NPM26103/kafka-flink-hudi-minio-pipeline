@@ -20,3 +20,7 @@ docker/data/
 docker/flink/data/
 docker/minio/data/
 **/data/
+
+# Lib
+*.jar
+docker/hive/auxlib/
