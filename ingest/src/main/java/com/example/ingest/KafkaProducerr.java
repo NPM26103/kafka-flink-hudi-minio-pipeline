@@ -15,11 +15,10 @@ public final class KafkaProducerr {
         props.put("key.serializer", StringSerializer.class.getName());
         props.put("value.serializer", StringSerializer.class.getName());
 
-        // reliability
-        props.put("acks", "all");
-        props.put("enable.idempotence", "true");
-        props.put("retries", "10");
-        props.put("linger.ms", "20");
+        props.put("acks", "all");  // chờ xác nhận trước khi báo done -> 0: gửi mess xong là done
+        props.put("enable.idempotence", "true");  //no dupli
+        props.put("retries", "10"); //error -> retry
+        props.put("linger.ms", "20");  // chờ tối đa 20 (ms) -> gom nhiều mess
 
         return new KafkaProducer<>(props);
     }

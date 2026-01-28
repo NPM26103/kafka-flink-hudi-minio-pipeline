@@ -34,4 +34,66 @@
     <name>datanucleus.schema.autoCreateAll</name>
     <value>false</value>
   </property>
+
+  <!-- HS2 bind/listen -->
+  <property>
+    <name>hive.server2.thrift.bind.host</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>hive.server2.thrift.port</name>
+    <value>10000</value>
+  </property>
+
+  <property>
+    <name>hive.server2.webui.host</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>hive.server2.webui.port</name>
+    <value>10002</value>
+  </property>
+
+  <!-- Transport/Auth (khớp với beeline auth=noSasl) -->
+  <property>
+    <name>hive.server2.transport.mode</name>
+    <value>binary</value>
+  </property>
+  <property>
+    <name>hive.server2.authentication</name>
+    <value>NOSASL</value>
+  </property>
+
+  <!-- Make sure HS2/Metastore can see Hudi + S3A classes -->
+  <property>
+    <name>hive.aux.jars.path</name>
+    <value>file:///opt/hive/auxlib/*</value>
+  </property>
+
+  <!-- Recommended scratch dirs inside container -->
+  <property>
+    <name>hive.exec.scratchdir</name>
+    <value>/tmp/hive</value>
+  </property>
+  <property>
+    <name>hive.querylog.location</name>
+    <value>/tmp/hive</value>
+  </property>
+
+  <!-- Cho phép tạo partition động khi insert/repair -->
+  <property>
+    <name>hive.exec.dynamic.partition</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.exec.dynamic.partition.mode</name>
+    <value>nonstrict</value>
+  </property>
+
+  <!-- Tránh lỗi quyền kiểu “Permission denied: user hive” khi warehouse local -->
+  <property>
+    <name>hive.warehouse.subdir.inherit.perms</name>
+    <value>true</value>
+</property>
+
 </configuration>

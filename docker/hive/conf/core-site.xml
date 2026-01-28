@@ -38,4 +38,20 @@
     <name>fs.s3a.aws.credentials.provider</name>
     <value>org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider</value>
   </property>
+
+  <property>
+    <name>fs.s3a.connection.maximum</name>
+    <value>100</value>
+  </property>
+
+  <property>
+    <name>fs.s3a.fast.upload</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>fs.s3a.connection.establish.timeout</name>
+    <value>5000</value>
+  </property>
+
 </configuration>

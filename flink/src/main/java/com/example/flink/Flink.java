@@ -44,7 +44,6 @@ public class Flink {
                 .filter(s -> !s.isBlank())
                 .collect(Collectors.toList());
 
-        // Nếu bật 2 nguồn thì topic nên có 2 phần tử (nhưng không bắt buộc)
         if ((enableCsv && enableHttp) && topics.size() < 2) {
             System.out.println("[WARN] ENABLE_CSV & ENABLE_HTTP are true but --topic has <2 topics. Both sources will read same topic.");
         }
@@ -98,7 +97,6 @@ public class Flink {
     ) {
         DataStream<String> s = null;
 
-        // mapping: nếu 2 topics thì [0]=csv, [1]=http; nếu 1 topic thì cả 2 đọc chung
         String csvTopic  = topics.get(0);
         String httpTopic = topics.size() >= 2 ? topics.get(1) : topics.get(0);
 
@@ -112,7 +110,7 @@ public class Flink {
             s = env.fromSource(csvSource, WatermarkStrategy.noWatermarks(), "CSV Kafka Source");
         }
 
-        if (enableHttp) {
+        if (enableHttp){
             KafkaSource<String> httpSource = KafkaSource.<String>builder()
                     .setBootstrapServers(bootstrap)
                     .setTopics(httpTopic)
@@ -134,7 +132,8 @@ public class Flink {
             ObjectNode n;
             try {
                 n = Json.parseObj(value);
-            } catch (Exception e) {
+            } 
+            catch (Exception e){
                 ctx.output(DLQ_TAG, buildDlq(value, "INVALID_JSON", e.getMessage()));
                 return;
             }
@@ -144,8 +143,8 @@ public class Flink {
                     "screen_time_hours","caffeine_intake","learning_efficiency","fatigue_index",
                     "quiz_score","assignment_score"
             };
-            for (String k : required) {
-                if (!n.hasNonNull(k)) {
+            for (String k : required){
+                if (!n.hasNonNull(k)){
                     ctx.output(DLQ_TAG, buildDlq(n.toString(), "MISSING_FIELD", "Missing: " + k));
                     return;
                 }
@@ -166,7 +165,7 @@ public class Flink {
                 double quiz = toDouble(n, "quiz_score");
                 double assign = toDouble(n, "assignment_score");
 
-                // normalize numeric
+                // normalize
                 n.put("student_id", studentId);
                 n.put("week", week);
                 n.put("study_hours", studyHours);
@@ -190,27 +189,26 @@ public class Flink {
                 n.put("_pipeline", "kafka->flink->kafka");
                 n.put("_processed_at", Instant.ofEpochMilli(ts).toString());
                 n.put("processed_ts_ms", ts);
-
-                // để Hudi job cũ chạy được luôn:
                 n.put("ts_ms", ts);
 
                 out.collect(n.toString());
-            } catch (Exception e) {
+            } 
+            catch (Exception e){
                 ctx.output(DLQ_TAG, buildDlq(n.toString(), "VALIDATION_ERROR", e.getMessage()));
             }
         }
 
-        private static long toLong(ObjectNode n, String k) {
+        private static long toLong(ObjectNode n, String k){
             if (n.get(k).isNumber()) return n.get(k).asLong();
             return Long.parseLong(n.get(k).asText().trim());
         }
 
-        private static double toDouble(ObjectNode n, String k) {
+        private static double toDouble(ObjectNode n, String k){
             if (n.get(k).isNumber()) return n.get(k).asDouble();
             return Double.parseDouble(n.get(k).asText().trim());
         }
 
-        private static String buildDlq(String raw, String code, String msg) {
+        private static String buildDlq(String raw, String code, String msg){
             ObjectNode err = Json.obj();
             err.put("_error_code", code);
             err.put("_error_message", msg);

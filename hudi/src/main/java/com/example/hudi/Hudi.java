@@ -5,10 +5,6 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 
-/**
- * Flink SQL + Hudi sink:
- * Kafka (output-topic) -> Hudi table on MinIO (s3a://...) + Hive Metastore sync (HMS).
- */
 public class Hudi {
 
     public static void main(String[] args) throws Exception {
@@ -21,11 +17,6 @@ public class Hudi {
         // basePath should be s3a://bucket/path (MinIO)
         String basePathArg = p.get("basePath", p.get("hudiPath", "s3a://hudi/student_perf"));
         String hudiPath = basePathArg;
-
-        // only prefix file:// if user really passed local absolute path
-        if (hudiPath.startsWith("/") && !hudiPath.startsWith("file://")) {
-            hudiPath = "file://" + hudiPath;
-        }
 
         String hudiTable = p.get("hudiTable", "student_perf");
 
@@ -44,10 +35,7 @@ public class Hudi {
         tEnv.getConfig().getConfiguration().setString("execution.checkpointing.interval", checkpointMs + " ms");
         tEnv.getConfig().getConfiguration().setString("execution.checkpointing.mode", "EXACTLY_ONCE");
 
-        // -------------------------
         // Kafka source table
-        // -------------------------
-        // NOTE: you MUST ensure incoming JSON has student_id, week, and ts_ms (or processed_ts_ms)
         String createKafkaSource =
                 "CREATE TABLE kafka_students (\n" +
                 "  student_id BIGINT,\n" +
@@ -81,9 +69,7 @@ public class Hudi {
                 "  'json.fail-on-missing-field' = 'false'\n" +
                 ")";
 
-        // -------------------------
-        // Hudi sink table (MinIO) + Hive Sync (HMS)
-        // -------------------------
+        // MinIO + Hive Sync
         String createHudiSink =
                 "CREATE TABLE hudi_students (\n" +
                 "  student_id BIGINT,\n" +
@@ -123,11 +109,14 @@ public class Hudi {
                 "  -- ========= Hive Sync (HMS) =========\n" +
                 "  'hoodie.datasource.hive_sync.enable' = 'true',\n" +
                 "  'hoodie.datasource.hive_sync.mode' = 'hms',\n" +
+                "  'hoodie.datasource.hive_sync.use_jdbc' = 'false',\n" +
                 "  'hoodie.datasource.hive_sync.metastore.uris' = '" + metastoreUris + "',\n" +
+                "  'hoodie.datasource.hive_sync.auto_create_database' = 'true',\n" +
                 "  'hoodie.datasource.hive_sync.database' = '" + hiveDb + "',\n" +
                 "  'hoodie.datasource.hive_sync.table' = '" + hiveTable + "',\n" +
                 "  'hoodie.datasource.hive_sync.partition_fields' = 'week',\n" +
-                "  'hoodie.datasource.hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.SinglePartPartitionValueExtractor'\n" +
+                "  'hoodie.datasource.write.hive_style_partitioning' = 'true',\n" +
+                "  'hoodie.datasource.hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.MultiPartKeysValueExtractor'\n" +
                 ")";
 
         String insertSql =
@@ -141,15 +130,12 @@ public class Hudi {
                 "FROM kafka_students\n" +
                 "WHERE student_id IS NOT NULL AND week IS NOT NULL";
 
-        // create & run
         tEnv.executeSql("CREATE DATABASE IF NOT EXISTS default_database"); // safe no-op
         tEnv.executeSql(createKafkaSource);
         tEnv.executeSql(createHudiSink);
 
         TableResult r = tEnv.executeSql(insertSql);
-        r.getJobClient().ifPresent(j -> System.out.println("✅ Job submitted: " + j.getJobID()));
-
-        // block so container doesn't exit
+        r.getJobClient().ifPresent(j -> System.out.println("Job submitted: " + j.getJobID()));
         r.getJobClient().get().getJobExecutionResult().get();
     }
 }

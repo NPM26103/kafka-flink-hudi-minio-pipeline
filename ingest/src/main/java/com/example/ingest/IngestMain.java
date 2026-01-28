@@ -1,12 +1,10 @@
 package com.example.ingest;
 
 import com.example.common.Args;
-import com.example.ingest.KafkaProducerr;
-import com.example.ingest.sources.*;
-
+import com.example.ingest.sources.CsvSource;
+import com.example.ingest.sources.HttpSource;
+import com.example.ingest.sources.JdbcSource;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class IngestMain {
 
@@ -32,42 +30,37 @@ public class IngestMain {
         try (KafkaProducer<String, String> producer =
                      KafkaProducerr.create(bootstrap, "ingest-" + modeName(enableCsv, enableHttp, enableJdbc))) {
 
-            ExecutorService pool = Executors.newFixedThreadPool(3);
-
-            if (enableCsv) {
-                pool.submit(() -> {
+            if (!enableHttp){
+                if (enableCsv){
                     try {
                         new CsvSource(cfg, producer, topic).runOnce();
                         System.out.println("[INGEST] CSV done -> " + topic);
-                    } catch (Exception e) {
+                    } 
+                    catch (Exception e){
                         throw new RuntimeException("[INGEST] CSV failed: " + e.getMessage(), e);
                     }
-                });
-            }
+                }
 
-            if (enableJdbc) {
-                pool.submit(() -> {
-                    try {
+                if (enableJdbc){
+                    try{
                         new JdbcSource(cfg, producer, topic).runOnce();
                         System.out.println("[INGEST] JDBC done -> " + topic);
-                    } catch (Exception e) {
+                    } 
+                    catch (Exception e){
                         throw new RuntimeException("[INGEST] JDBC failed: " + e.getMessage(), e);
                     }
-                });
+                }
+
+                return;
             }
 
-            if (enableHttp) {
-                pool.submit(() -> {
-                    try {
-                        new HttpSource(cfg, producer, topic).runLoop();
-                        System.out.println("[INGEST] HTTP loop -> " + topic);
-                    } catch (Exception e) {
-                        throw new RuntimeException("[INGEST] HTTP failed: " + e.getMessage(), e);
-                    }
-                });
+            try{
+                new HttpSource(cfg, producer, topic).runLoop();
+                System.out.println("[INGEST] HTTP loop -> " + topic);
+            } 
+            catch (Exception e){
+                throw new RuntimeException("[INGEST] HTTP failed: " + e.getMessage(), e);
             }
-
-            Thread.currentThread().join();
         }
     }
 
