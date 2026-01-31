@@ -13,11 +13,24 @@
   <artifactId>spring_boot</artifactId>
   <packaging>jar</packaging>
 
+  <properties>
+    <lombok.version>1.18.34</lombok.version>
+    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.example</groupId>
       <artifactId>common</artifactId>
       <version>${project.version}</version>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
     </dependency>
 
     <dependency>
@@ -30,6 +43,7 @@
       <artifactId>spring-boot-starter-data-jpa</artifactId>
     </dependency>
 
+    <!-- ✅ dùng spring-kafka như bản cũ (Boot BOM từ parent sẽ quản version) -->
     <dependency>
       <groupId>org.springframework.kafka</groupId>
       <artifactId>spring-kafka</artifactId>
@@ -44,6 +58,23 @@
 
   <build>
     <plugins>
+      <!-- Lombok annotation processor -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven-compiler-plugin.version}</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
@@ -60,4 +91,5 @@
       </plugin>
     </plugins>
   </build>
+
 </project>

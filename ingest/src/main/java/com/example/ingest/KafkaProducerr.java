@@ -6,19 +6,34 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import java.util.Properties;
 
 public final class KafkaProducerr {
-    private KafkaProducerr(){}
+
+    private KafkaProducerr() {}
 
     public static KafkaProducer<String, String> create(String bootstrap, String clientId) {
         Properties props = new Properties();
+
         props.put("bootstrap.servers", bootstrap);
         props.put("client.id", clientId);
+
         props.put("key.serializer", StringSerializer.class.getName());
         props.put("value.serializer", StringSerializer.class.getName());
 
-        props.put("acks", "all");  // chờ xác nhận trước khi báo done -> 0: gửi mess xong là done
-        props.put("enable.idempotence", "true");  //no dupli
-        props.put("retries", "10"); //error -> retry
-        props.put("linger.ms", "20");  // chờ tối đa 20 (ms) -> gom nhiều mess
+        // reliability
+        props.put("acks", "all");
+        props.put("enable.idempotence", "true");
+        props.put("retries", "10");
+
+        // throughput (safe)
+        props.put("linger.ms", "20");
+        props.put("batch.size", String.valueOf(32 * 1024)); // 32KB
+        props.put("compression.type", "lz4");
+
+        // idempotence
+        props.put("max.in.flight.requests.per.connection", "5");
+
+        // timeouts
+        props.put("request.timeout.ms", "30000");
+        props.put("delivery.timeout.ms", "120000");
 
         return new KafkaProducer<>(props);
     }

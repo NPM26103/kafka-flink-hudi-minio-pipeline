@@ -13,19 +13,28 @@
   <artifactId>ingest</artifactId>
   <packaging>jar</packaging>
 
-  <dependencies>
-		<dependency>
-			<groupId>org.slf4j</groupId>
-			<artifactId>slf4j-simple</artifactId>
-		</dependency>
+  <properties>
+    <lombok.version>1.18.34</lombok.version>
+    <logback.version>1.4.14</logback.version>
+    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+  </properties>
 
+  <dependencies>
     <dependency>
       <groupId>com.example</groupId>
       <artifactId>common</artifactId>
       <version>${project.version}</version>
     </dependency>
 
-    <!-- version lấy từ dependencyManagement root (commons-csv) -->
+    <!-- ✅ Lombok (compile-time) -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- version lấy từ dependencyManagement root -->
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-csv</artifactId>
@@ -37,10 +46,39 @@
       <artifactId>kafka-clients</artifactId>
       <version>3.6.1</version>
     </dependency>
+
+    <!-- ✅ Logging runtime: tránh lỗi NoClassDefFoundError logback-core -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>${logback.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-core</artifactId>
+      <version>${logback.version}</version>
+    </dependency>
   </dependencies>
 
   <build>
     <plugins>
+      <!-- ✅ Lombok annotation processor -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven-compiler-plugin.version}</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
       <!-- tạo fat-jar có Main-Class để java -jar chạy được -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

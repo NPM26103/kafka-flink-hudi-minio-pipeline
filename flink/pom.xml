@@ -13,24 +13,43 @@
   <artifactId>flink</artifactId>
   <packaging>jar</packaging>
 
-  <!-- QUAN TRỌNG: Flink 1.18 chạy tốt với Java 17 -->
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
+    <lombok.version>1.18.34</lombok.version>
+    <slf4j.version>2.0.16</slf4j.version>
+    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+    <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
   </properties>
 
   <dependencies>
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-shaded-jackson</artifactId>
-			<version>2.14.2-17.0</version>
-			<scope>provided</scope>
-		</dependency>
+    <dependency>
+      <groupId>org.apache.flink</groupId>
+      <artifactId>flink-shaded-jackson</artifactId>
+      <version>2.14.2-17.0</version>
+      <scope>provided</scope>
+    </dependency>
 
-    <!-- compile scope để shade vào jar -->
+    <!-- compile scope để shade common vào jar -->
     <dependency>
       <groupId>com.example</groupId>
       <artifactId>common</artifactId>
       <version>${project.version}</version>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- chỉ cần API, binding do Flink image cung cấp -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+      <scope>provided</scope>
     </dependency>
 
     <!-- Flink runtime có sẵn trên cluster -->
@@ -48,31 +67,31 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- connector kafka: để provided, vì bạn đã bỏ jar vào /opt/flink/lib -->
+    <!-- connector kafka: provided vì bạn đã bỏ jar vào /opt/flink/lib -->
     <dependency>
       <groupId>org.apache.flink</groupId>
       <artifactId>flink-connector-kafka</artifactId>
       <version>${flink.kafka.connector.version}</version>
       <scope>provided</scope>
     </dependency>
-
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
-      <version>${slf4j.version}</version>
-      <scope>provided</scope>
-    </dependency>
   </dependencies>
 
   <build>
     <plugins>
-      <!-- compiler release 17 -->
+      <!-- compiler release 17 + Lombok processor -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.13.0</version>
+        <version>${maven-compiler-plugin.version}</version>
         <configuration>
           <release>${maven.compiler.release}</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
         </configuration>
       </plugin>
 
@@ -80,7 +99,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.6.0</version>
+        <version>${maven-shade-plugin.version}</version>
         <executions>
           <execution>
             <phase>package</phase>
@@ -108,4 +127,5 @@
       </plugin>
     </plugins>
   </build>
+
 </project>
