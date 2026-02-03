@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: viewer
+  namespace: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: viewer
+  template:
+    metadata:
+      labels:
+        app: viewer
+    spec:
+      containers:
+        - name: viewer
+          image: pipeline-viewer:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: APP_TOPIC
+              value: output-topic
+
+            # H2 + JPA
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:h2:mem:viewdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+            - name: SPRING_DATASOURCE_USERNAME
+              value: sa
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: ""
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: update
+
+            # Enable H2 console
+            - name: SPRING_H2_CONSOLE_ENABLED
+              value: "true"
+            - name: SPRING_H2_CONSOLE_PATH
+              value: /h2-console
+            - name: SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS
+              value: "true"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: viewer
+  namespace: pipeline
+spec:
+  selector:
+    app: viewer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

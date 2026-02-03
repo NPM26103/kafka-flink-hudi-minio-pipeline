@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest-http
+  namespace: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingest-http
+  template:
+    metadata:
+      labels:
+        app: ingest-http
+    spec:
+      containers:
+        - name: ingest
+          image: pipeline-ingest:1.0.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--bootstrap=kafka:9092"
+            - "--topic=raw.student.http"
+            - "--ENABLE_HTTP=true"
+            - "--url=http://mock-student-api:8088/students"
+            - "--intervalMs=5000"

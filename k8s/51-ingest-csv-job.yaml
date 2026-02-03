@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ingest-csv
+  namespace: pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ingest
+          image: pipeline-ingest:1.0.0
+          imagePullPolicy: Never
+          args:
+            - "--bootstrap=kafka:9092"
+            - "--topic=raw.student.csv"
+            - "--ENABLE_CSV=true"
+            - "--csvPath=/data/student.csv"
+          volumeMounts:
+            - name: csv
+              mountPath: /data
+      volumes:
+        - name: csv
+          persistentVolumeClaim:
+            claimName: csv-pvc

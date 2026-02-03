@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: submit-hudi-writer
+  namespace: pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+
+      initContainers:
+        - name: wait-jobmanager
+          image: python:3.11-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python","-c"]
+          args:
+            - |
+              import time, urllib.request
+              url = "http://jobmanager:8081/overview"
+              print("Waiting JobManager REST:", url, flush=True)
+              while True:
+                try:
+                  with urllib.request.urlopen(url, timeout=2) as r:
+                    if r.status == 200:
+                      print("JobManager is ready.", flush=True)
+                      break
+                except Exception as e:
+                  pass
+                time.sleep(2)
+
+      containers:
+        - name: submit
+          image: final-flink:1.18.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HADOOP_CONF_DIR
+              value: /opt/flink/conf
+            - name: AWS_ACCESS_KEY_ID
+              value: minioadmin
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minioadmin
+          command: ["sh","-lc"]
+          args:
+            - |
+              set -e
+              /opt/flink/bin/flink run -d -m jobmanager:8081 \
+                -c com.example.hudi.Hudi \
+                /opt/flink/usrlib/hudi-1.0.0-shaded.jar \
+                --bootstrap=kafka:9092 \
+                --topic=output-topic \
+                --groupId=hudi-writer \
+                --basePath=s3a://hudi/student_perf \
+                --hiveSync=false

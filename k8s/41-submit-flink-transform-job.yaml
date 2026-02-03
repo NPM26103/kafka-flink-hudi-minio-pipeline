@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: submit-flink-transform
+  namespace: pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-jobmanager
+          image: curlimages/curl:8.5.0
+          imagePullPolicy: IfNotPresent
+          command: ["sh","-lc"]
+          args:
+            - |
+              echo "Waiting JobManager REST..."
+              until curl -sf http://jobmanager:8081/overview >/dev/null; do
+                sleep 2
+              done
+              echo "JobManager is ready."
+      containers:
+        - name: submit
+          image: final-flink:1.18.1
+          imagePullPolicy: IfNotPresent
+          command: ["sh","-lc"]
+          args:
+            - |
+              set -e
+              /opt/flink/bin/flink run -d -m jobmanager:8081 \
+                -c com.example.flink.Flink \
+                /opt/flink/usrlib/flink-1.0.0.jar \
+                --bootstrap=kafka:9092 \
+                --groupId=flink-group \
+                --topic=raw.student.csv,raw.student.http \
+                --outTopic=output-topic \
+                --dlqTopic=output-topic-dlq \
+                --checkpointMs=5000 \
+                --ENABLE_CSV=true \
+                --ENABLE_HTTP=true

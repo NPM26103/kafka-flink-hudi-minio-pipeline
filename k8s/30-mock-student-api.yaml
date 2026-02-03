@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mock-student-api
+  namespace: pipeline
+data:
+  server.py: |
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import json, random
+    from datetime import datetime, timezone
+
+    def rec():
+        student_id = random.randint(1, 2000)
+        week = random.randint(1, 30)
+        study_hours = random.uniform(0, 12)
+        sleep_hours = random.uniform(4, 9)
+        stress_level = random.uniform(0, 10)
+        attendance_rate = random.uniform(0.5, 1.0)
+        screen_time_hours = random.uniform(0, 8)
+        caffeine_intake = random.randint(0, 6)
+        learning_efficiency = random.uniform(0, 1)
+        fatigue_index = random.uniform(0, 1)
+        quiz_score = random.uniform(0, 100)
+        assignment_score = random.uniform(0, 200)
+        perf = 0.5*quiz_score + 0.5*assignment_score
+
+        return {
+            "student_id": str(student_id),
+            "week": str(week),
+            "study_hours": str(study_hours),
+            "sleep_hours": str(sleep_hours),
+            "stress_level": str(stress_level),
+            "attendance_rate": str(attendance_rate),
+            "screen_time_hours": str(screen_time_hours),
+            "caffeine_intake": str(caffeine_intake),
+            "learning_efficiency": str(learning_efficiency),
+            "fatigue_index": str(fatigue_index),
+            "quiz_score": str(quiz_score),
+            "assignment_score": str(assignment_score),
+            "performance_index": perf,
+            "_source": "http_mock",
+            "_ingested_at": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+        }
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/students"):
+                count = 1000
+                arr = [rec() for _ in range(count)]
+                b = json.dumps(arr).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+            elif self.path.startswith("/student"):
+                b = json.dumps(rec()).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+    HTTPServer(("0.0.0.0", 8088), H).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-student-api
+  namespace: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-student-api
+  template:
+    metadata:
+      labels:
+        app: mock-student-api
+    spec:
+      containers:
+        - name: api
+          image: python:3.11-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/server.py"]
+          ports:
+            - containerPort: 8088
+          volumeMounts:
+            - name: app
+              mountPath: /app
+      volumes:
+        - name: app
+          configMap:
+            name: mock-student-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-student-api
+  namespace: pipeline
+spec:
+  selector:
+    app: mock-student-api
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088

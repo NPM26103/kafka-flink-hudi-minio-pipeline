@@ -14,7 +14,6 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
-// ✅ Dùng Flink shaded Jackson (KHÔNG dùng com.fasterxml.*)
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
@@ -29,7 +28,6 @@ public class Flink {
     public static void main(String[] args) throws Exception {
         Args cfg = Args.parse(args);
 
-        // hỗ trợ cả --bootstrap và --bootstrapServers
         String bootstrap = cfg.get("bootstrap", cfg.get("bootstrapServers", "localhost:9092"));
         String groupId   = cfg.get("groupId", "flink-group");
 
@@ -54,7 +52,7 @@ public class Flink {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.enableCheckpointing(checkpointMs);
 
-        // OutputTag tạo trong main rồi truyền vào function để tránh closure dính outer class
+        // Tránh outer class: tạo trong main rồi truyền vào function
         final OutputTag<String> dlqTag = new OutputTag<>("dlq") {};
 
         DataStream<String> input = buildInput(env, bootstrap, groupId, enableCsv, enableHttp, topics);
@@ -85,7 +83,7 @@ public class Flink {
         ok.sinkTo(outSink);
         dlq.sinkTo(dlqSink);
 
-        env.execute("kafka -> flink -> kafka (union by ENABLE + --topic)");
+        env.execute("Flink");
     }
 
     private static DataStream<String> buildInput(
@@ -126,11 +124,8 @@ public class Flink {
         return s;
     }
 
-    static class ValidateAndComputePerformance extends ProcessFunction<String, String> {
-
+    static class ValidateAndComputePerformance extends ProcessFunction<String, String>{
         private final OutputTag<String> dlqTag;
-
-        // ✅ transient để Flink serialize function OK
         private transient ObjectMapper mapper;
 
         ValidateAndComputePerformance(OutputTag<String> dlqTag) {
@@ -152,7 +147,6 @@ public class Flink {
                 return;
             }
 
-            // Nếu là record CSV (score) => xử lý đơn giản
             if (n.hasNonNull("score") && !n.hasNonNull("quiz_score")) {
                 try {
                     double score = toDouble(n, "score");
@@ -173,7 +167,6 @@ public class Flink {
                 return;
             }
 
-            // HTTP schema required fields
             String[] required = {
                     "student_id","week","study_hours","sleep_hours","stress_level","attendance_rate",
                     "screen_time_hours","caffeine_intake","learning_efficiency","fatigue_index",
@@ -201,7 +194,6 @@ public class Flink {
                 double quiz = toDouble(n, "quiz_score");
                 double assign = toDouble(n, "assignment_score");
 
-                // normalize types
                 n.put("student_id", studentId);
                 n.put("week", week);
                 n.put("study_hours", studyHours);

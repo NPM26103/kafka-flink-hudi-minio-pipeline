@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobmanager
+  namespace: pipeline
+spec:
+  selector:
+    app: flink
+    role: jobmanager
+  ports:
+    - name: rest
+      port: 8081
+      targetPort: 8081
+    - name: rpc
+      port: 6123
+      targetPort: 6123
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink
+      role: jobmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        role: jobmanager
+    spec:
+      containers:
+        - name: jobmanager
+          image: final-flink:1.18.1
+          imagePullPolicy: IfNotPresent
+          args: ["jobmanager"]
+          ports:
+            - containerPort: 8081
+            - containerPort: 6123
+          env:
+            - name: HADOOP_CONF_DIR
+              value: /opt/flink/conf
+            - name: AWS_ACCESS_KEY_ID
+              value: minioadmin
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minioadmin
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: jobmanager
+                parallelism.default: 1
+                taskmanager.numberOfTaskSlots: 2
+                state.backend: hashmap
+                state.checkpoints.dir: file:///data/flink-checkpoints
+                state.savepoints.dir: file:///data/flink-savepoints
+
+                fs.s3a.endpoint: http://minio:9000
+                fs.s3a.access.key: minioadmin
+                fs.s3a.secret.key: minioadmin
+                fs.s3a.path.style.access: true
+                fs.s3a.connection.ssl.enabled: false
+                fs.s3a.aws.credentials.provider: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+                fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+                fs.AbstractFileSystem.s3a.impl: org.apache.hadoop.fs.s3a.S3A
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink
+      role: taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        role: taskmanager
+    spec:
+      containers:
+        - name: taskmanager
+          image: final-flink:1.18.1
+          imagePullPolicy: IfNotPresent
+          args: ["taskmanager"]
+          env:
+            - name: HADOOP_CONF_DIR
+              value: /opt/flink/conf
+            - name: AWS_ACCESS_KEY_ID
+              value: minioadmin
+            - name: AWS_SECRET_ACCESS_KEY
+              value: minioadmin
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: jobmanager
+                taskmanager.numberOfTaskSlots: 2
+                parallelism.default: 1
+
+                fs.s3a.endpoint: http://minio:9000
+                fs.s3a.access.key: minioadmin
+                fs.s3a.secret.key: minioadmin
+                fs.s3a.path.style.access: true
+                fs.s3a.connection.ssl.enabled: false
+                fs.s3a.aws.credentials.provider: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+                fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+                fs.AbstractFileSystem.s3a.impl: org.apache.hadoop.fs.s3a.S3A
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

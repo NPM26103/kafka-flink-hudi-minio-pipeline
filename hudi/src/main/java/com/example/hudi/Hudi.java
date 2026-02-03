@@ -11,7 +11,7 @@ public class Hudi {
 
     private static final Logger log = LoggerFactory.getLogger(Hudi.class);
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception{
         Args p = Args.parse(args);
 
         String bootstrap = p.get("bootstrap", "broker:9092");
@@ -20,6 +20,8 @@ public class Hudi {
 
         String hudiPath  = p.get("basePath", p.get("hudiPath", "s3a://hudi/student_perf"));
         String hudiTable = p.get("hudiTable", "student_perf");
+
+        boolean hiveSyncEnable = p.getBool("hiveSync", false);
 
         String hiveDb        = p.get("hiveDb", "hudi");
         String hiveTable     = p.get("hiveTable", hudiTable);
@@ -39,16 +41,16 @@ public class Hudi {
         tEnv.executeSql("CREATE DATABASE IF NOT EXISTS default_database"); // safe no-op
 
         tEnv.executeSql(kafkaSourceSql(inTopic, bootstrap, groupId));
-        tEnv.executeSql(hudiSinkSql(hudiPath, hudiTable, hiveDb, hiveTable, metastoreUris));
+        tEnv.executeSql(hudiSinkSql(hudiPath, hudiTable, hiveSyncEnable, hiveDb, hiveTable, metastoreUris));
 
         TableResult r = tEnv.executeSql(insertSql());
         r.getJobClient().ifPresent(j -> log.info("Job submitted: {}", j.getJobID()));
         r.getJobClient().get().getJobExecutionResult().get();
     }
 
-    private static String kafkaSourceSql(String inTopic, String bootstrap, String groupId) {
+    private static String kafkaSourceSql(String inTopic, String bootstrap, String groupId){
         return """
-                CREATE TABLE kafka_students (
+                CREATE TABLE kafka_students(
                   student_id BIGINT,
                   week INT,
                   study_hours DOUBLE,
@@ -69,7 +71,8 @@ public class Hudi {
                   processed_ts_ms BIGINT,
                   ts_ms BIGINT,
                   ts_ms_fixed AS COALESCE(processed_ts_ms, ts_ms, CAST(UNIX_TIMESTAMP() * 1000 AS BIGINT))
-                ) WITH (
+                )
+                WITH (
                   'connector' = 'kafka',
                   'topic' = '%s',
                   'properties.bootstrap.servers' = '%s',
@@ -82,7 +85,33 @@ public class Hudi {
                 """.formatted(inTopic, bootstrap, groupId);
     }
 
-    private static String hudiSinkSql(String hudiPath, String hudiTable, String hiveDb, String hiveTable, String metastoreUris) {
+    private static String hudiSinkSql(
+            String hudiPath,
+            String hudiTable,
+            boolean hiveSyncEnable,
+            String hiveDb,
+            String hiveTable,
+            String metastoreUris
+    ) {
+        String hivePart = hiveSyncEnable
+                ? """
+                  ,
+                  'hoodie.datasource.hive_sync.enable' = 'true',
+                  'hoodie.datasource.hive_sync.mode' = 'hms',
+                  'hoodie.datasource.hive_sync.use_jdbc' = 'false',
+                  'hoodie.datasource.hive_sync.metastore.uris' = '%s',
+                  'hoodie.datasource.hive_sync.auto_create_database' = 'true',
+                  'hoodie.datasource.hive_sync.database' = '%s',
+                  'hoodie.datasource.hive_sync.table' = '%s',
+                  'hoodie.datasource.hive_sync.partition_fields' = 'week',
+                  'hoodie.datasource.write.hive_style_partitioning' = 'true',
+                  'hoodie.datasource.hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.MultiPartKeysValueExtractor'
+                """.formatted(metastoreUris, hiveDb, hiveTable)
+                : """
+                  ,
+                  'hoodie.datasource.hive_sync.enable' = 'false'
+                """;
+
         return """
                 CREATE TABLE hudi_students (
                   student_id BIGINT,
@@ -114,25 +143,14 @@ public class Hudi {
                   'hoodie.datasource.write.recordkey.field' = 'student_id,week',
                   'hoodie.datasource.write.partitionpath.field' = 'week',
                   'hoodie.datasource.write.precombine.field' = 'ts_ms',
-
                   'hoodie.filesystem.view.type' = 'MEMORY',
-                  'hoodie.metadata.enable' = 'false',
-
-                  'hoodie.datasource.hive_sync.enable' = 'true',
-                  'hoodie.datasource.hive_sync.mode' = 'hms',
-                  'hoodie.datasource.hive_sync.use_jdbc' = 'false',
-                  'hoodie.datasource.hive_sync.metastore.uris' = '%s',
-                  'hoodie.datasource.hive_sync.auto_create_database' = 'true',
-                  'hoodie.datasource.hive_sync.database' = '%s',
-                  'hoodie.datasource.hive_sync.table' = '%s',
-                  'hoodie.datasource.hive_sync.partition_fields' = 'week',
-                  'hoodie.datasource.write.hive_style_partitioning' = 'true',
-                  'hoodie.datasource.hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.MultiPartKeysValueExtractor'
+                  'hoodie.metadata.enable' = 'false'
+                  %s
                 )
-                """.formatted(hudiPath, hudiTable, metastoreUris, hiveDb, hiveTable);
+                """.formatted(hudiPath, hudiTable, hivePart);
     }
 
-    private static String insertSql() {
+    private static String insertSql(){
         return """
                 INSERT INTO hudi_students
                 SELECT
