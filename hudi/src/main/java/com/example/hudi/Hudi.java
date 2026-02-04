@@ -11,21 +11,15 @@ public class Hudi {
 
     private static final Logger log = LoggerFactory.getLogger(Hudi.class);
 
-    public static void main(String[] args) throws Exception{
+    public static void main(String[] args) throws Exception {
         Args p = Args.parse(args);
 
-        String bootstrap = p.get("bootstrap", "broker:9092");
+        String bootstrap = p.get("bootstrap", "kafka:9092");
         String inTopic   = p.get("topic", "output-topic");
         String groupId   = p.get("groupId", "hudi-writer");
 
         String hudiPath  = p.get("basePath", p.get("hudiPath", "s3a://hudi/student_perf"));
         String hudiTable = p.get("hudiTable", "student_perf");
-
-        boolean hiveSyncEnable = p.getBool("hiveSync", false);
-
-        String hiveDb        = p.get("hiveDb", "hudi");
-        String hiveTable     = p.get("hiveTable", hudiTable);
-        String metastoreUris = p.get("hmsUris", "thrift://hive-metastore:9083");
 
         int  parallelism  = (int) p.getLong("parallelism", 1);
         long checkpointMs = p.getLong("checkpointMs", 30000);
@@ -38,17 +32,19 @@ public class Hudi {
         tEnv.getConfig().getConfiguration().setString("execution.checkpointing.interval", checkpointMs + " ms");
         tEnv.getConfig().getConfiguration().setString("execution.checkpointing.mode", "EXACTLY_ONCE");
 
-        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS default_database"); // safe no-op
-
+        // Source: Kafka JSON
         tEnv.executeSql(kafkaSourceSql(inTopic, bootstrap, groupId));
-        tEnv.executeSql(hudiSinkSql(hudiPath, hudiTable, hiveSyncEnable, hiveDb, hiveTable, metastoreUris));
 
+        // Sink: Hudi on S3A (MinIO) - NO Hive sync
+        tEnv.executeSql(hudiSinkSql(hudiPath, hudiTable));
+
+        // Streaming insert (runs continuously inside Flink cluster)
         TableResult r = tEnv.executeSql(insertSql());
         r.getJobClient().ifPresent(j -> log.info("Job submitted: {}", j.getJobID()));
         r.getJobClient().get().getJobExecutionResult().get();
     }
 
-    private static String kafkaSourceSql(String inTopic, String bootstrap, String groupId){
+    private static String kafkaSourceSql(String inTopic, String bootstrap, String groupId) {
         return """
                 CREATE TABLE kafka_students(
                   student_id BIGINT,
@@ -85,33 +81,7 @@ public class Hudi {
                 """.formatted(inTopic, bootstrap, groupId);
     }
 
-    private static String hudiSinkSql(
-            String hudiPath,
-            String hudiTable,
-            boolean hiveSyncEnable,
-            String hiveDb,
-            String hiveTable,
-            String metastoreUris
-    ) {
-        String hivePart = hiveSyncEnable
-                ? """
-                  ,
-                  'hoodie.datasource.hive_sync.enable' = 'true',
-                  'hoodie.datasource.hive_sync.mode' = 'hms',
-                  'hoodie.datasource.hive_sync.use_jdbc' = 'false',
-                  'hoodie.datasource.hive_sync.metastore.uris' = '%s',
-                  'hoodie.datasource.hive_sync.auto_create_database' = 'true',
-                  'hoodie.datasource.hive_sync.database' = '%s',
-                  'hoodie.datasource.hive_sync.table' = '%s',
-                  'hoodie.datasource.hive_sync.partition_fields' = 'week',
-                  'hoodie.datasource.write.hive_style_partitioning' = 'true',
-                  'hoodie.datasource.hive_sync.partition_extractor_class' = 'org.apache.hudi.hive.MultiPartKeysValueExtractor'
-                """.formatted(metastoreUris, hiveDb, hiveTable)
-                : """
-                  ,
-                  'hoodie.datasource.hive_sync.enable' = 'false'
-                """;
-
+    private static String hudiSinkSql(String hudiPath, String hudiTable) {
         return """
                 CREATE TABLE hudi_students (
                   student_id BIGINT,
@@ -138,19 +108,27 @@ public class Hudi {
                   'connector' = 'hudi',
                   'path' = '%s',
                   'hoodie.table.name' = '%s',
+
                   'table.type' = 'COPY_ON_WRITE',
                   'write.operation' = 'upsert',
+
                   'hoodie.datasource.write.recordkey.field' = 'student_id,week',
                   'hoodie.datasource.write.partitionpath.field' = 'week',
                   'hoodie.datasource.write.precombine.field' = 'ts_ms',
+
+                  -- KHÔNG dùng Hive sync
+                  'hoodie.datasource.hive_sync.enable' = 'false',
+
+                  -- Tuỳ chọn: tạo folder kiểu week=1/ (dễ query), KHÔNG liên quan Hive metastore
+                  'hoodie.datasource.write.hive_style_partitioning' = 'true',
+
                   'hoodie.filesystem.view.type' = 'MEMORY',
                   'hoodie.metadata.enable' = 'false'
-                  %s
                 )
-                """.formatted(hudiPath, hudiTable, hivePart);
+                """.formatted(hudiPath, hudiTable);
     }
 
-    private static String insertSql(){
+    private static String insertSql() {
         return """
                 INSERT INTO hudi_students
                 SELECT

@@ -25,7 +25,7 @@ spec:
                     if r.status == 200:
                       print("JobManager is ready.", flush=True)
                       break
-                except Exception as e:
+                except Exception:
                   pass
                 time.sleep(2)
 
@@ -50,5 +50,4 @@ spec:
                 --bootstrap=kafka:9092 \
                 --topic=output-topic \
                 --groupId=hudi-writer \
-                --basePath=s3a://hudi/student_perf \
-                --hiveSync=false
+                --basePath=s3a://hudi/student_perf
